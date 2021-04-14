@@ -2,6 +2,8 @@ import os
 import time
 import datetime
 import numpy as np
+import cv2
+from multiprocessing import Process
 
 from direct.showbase.ShowBase import ShowBase
 from panda3d.core import loadPrcFile, AmbientLight, DirectionalLight, VBase3, VBase4, Vec4, Vec2, \
@@ -104,15 +106,19 @@ class QuadRotorSimulation(ShowBase):
 
         self.time = datetime.datetime.today().strftime('%Y-%m-%d-%H.%M.%S')
         self.simulation_folder = "\sims\\" + self.time + '\\'
-        os.makedirs(ROOT_DIR + self.simulation_folder)
+        self.simulation_folder_path = ROOT_DIR + self.simulation_folder
+        os.makedirs(self.simulation_folder_path)
         self.movements = ''
 
         self.taskMgr.add(self.camera_move, 'Camera Movement')
         self.taskMgr.add(self.quad_move, 'Quad Movement')
         self.taskMgr.add(self.rotate_propellers, 'Propellers Rotation')
+        self.taskMgr.add(self.save_image, 'Screenshot Capture')
 
         # self.buffer: GraphicsBuffer = self.win.makeTextureBuffer(name='buffer', x_size=84, y_size=84, tex=None, to_ram=True)
         # self.buffer.setActive(1)
+        self.images = []
+        self.image_index = 1
 
     def camera_move(self, task):
         """
@@ -150,7 +156,6 @@ class QuadRotorSimulation(ShowBase):
         position_proportionality_constant = 0.0007
         angle_proportionality_constant = 0.2
         angle_max = 10
-        yaw_ratio = 0.5
         angle_directions = {i: k, j: -j}
 
         keys_vs_moves = {'w': i,
@@ -158,8 +163,7 @@ class QuadRotorSimulation(ShowBase):
                          'a': j,
                          'd': -j,
                          'e': k,
-                         'q': -k,
-                         ' ': ()}
+                         'q': -k}
 
         move_total = LPoint3f(0, 0, 0)
         angle_total = LPoint3f(0, 0, 0)
@@ -169,15 +173,7 @@ class QuadRotorSimulation(ShowBase):
             if pressed_key:
                 move_total += move
 
-                # yaw, pitch, roll = self.quad_model.get_hpr()
-                #
-                # pitch_ratio = pitch / angle_max
-                # roll_ratio = roll / angle_max
-                #
-                # ratios = np.array([- sign(move) * roll_ratio, - sign(move) * pitch_ratio, yaw_ratio])
-                # move_total += LPoint3f(*(c1 * c2 for c1, c2 in zip(move, ratios)))
-                #
-                if key not in ['e', 'q']:
+                if key not in ['e', 'q', 'm']:
                     angle_total += LPoint3f(*tuple(sign(move) *
                                                    np.array(
                                                        angle_directions[LPoint3f(*tuple(int(abs(c)) for c in move))])
@@ -192,8 +188,9 @@ class QuadRotorSimulation(ShowBase):
 
                 with open(ROOT_DIR + self.simulation_folder + 'movements.txt', 'w') as file:
                     file.write(self.movements)
-                # self.screenshot(namePrefix=self.simulation_folder, defaultFilename=1,
-                #                 source=None, imageComment="")
+
+                    # self.movie(namePrefix=self.simulation_folder, duration=1.0, fps=30,
+                    #       format='png', sd=4, source=None)
 
         if any([abs(coordinate) > 0 for coordinate in angle_total]):
             # tilt_force_node = ForceNode('tilt-force')
@@ -213,7 +210,6 @@ class QuadRotorSimulation(ShowBase):
             self.quad_model.setHpr(desired_quad_hpr)
 
         if any([abs(coordinate) > 0 for coordinate in move_total]):
-            #     print(move_total)
 
             movement_force_node = ForceNode('movement-force')
             movement_force = LinearVectorForce(*(- move_total * position_proportionality_constant))
@@ -229,25 +225,38 @@ class QuadRotorSimulation(ShowBase):
             # desired_quad_pos = self.quad_model.getPos() + move_total * position_proportionality_constant
             # self.quad_model.setPos(desired_quad_pos)
 
-            # import cv2
-            #
-            # self.graphicsEngine.renderFrame()
-            # tex = self.buffer.getTexture()
-            # img = tex.getRamImage()
-            # image = np.frombuffer(img, np.uint8)
-            #
-            # if len(image):
-            #     image = np.reshape(image, (tex.getYSize(), tex.getXSize(), 4))
-            #     image = cv2.flip(image, 0)
-            #     print(image)
-            #
-            #     cv2.imwrite('1.png', image)
-
         return task.cont
 
     def rotate_propellers(self, task):
         for prop in self.prop_models:
             prop.setHpr(prop.get_hpr() + LPoint3f(30, 0, 0))
+
+        return task.cont
+
+    # def produce_video(self):
+
+    def save_image(self, task):
+        self.image_index += 1
+        if self.image_index % 10 == 0:
+            self.screenshot(namePrefix=rf'{self.simulation_folder}\image')
+
+        if self.image_index % 100 == 0:
+            # p = Process(target=my_function, args=(queue, 1))
+            # p.start()
+
+            video_name = rf'{self.simulation_folder_path}\video.avi'
+
+            images = [img for img in os.listdir(self.simulation_folder_path) if img.endswith(".jpg")]
+            frame = cv2.imread(os.path.join(self.simulation_folder_path, images[0]))
+            height, width, layers = frame.shape
+
+            video = cv2.VideoWriter(video_name, 0, 30, (width, height))
+
+            for image in images:
+                video.write(cv2.imread(os.path.join(self.simulation_folder_path, image)))
+
+            cv2.destroyAllWindows()
+            video.release()
 
         return task.cont
 
